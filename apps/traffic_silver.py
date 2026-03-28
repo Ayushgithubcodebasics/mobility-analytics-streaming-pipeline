@@ -62,22 +62,33 @@ def _label_reject_reason(df):
 
 
 def process_silver_batch(batch_df, epoch_id: int) -> None:
+    # Cache batch_df BEFORE the first count() so the scan is only paid once.
+    # All downstream transformations build on this cached DataFrame.
+    batch_df.cache()
     total_in = batch_df.count()
 
     if total_in == 0:
         log.info("Silver batch=%d | empty batch, skipping", epoch_id)
+        batch_df.unpersist()
         return
 
-    batch_df.cache()
+    validated = None
+    duplicates = None
+    rejected_pre_dedup = None
+    final = None
     try:
         dq_df = apply_dq_flags(batch_df)
         typed = apply_type_casting(dq_df)
         validated = apply_business_validation(typed)
-        labeled = _label_reject_reason(validated)
+        # Cache validated: used twice for speed/time reject counts + filter_clean_records
+        validated.cache()
 
+        labeled = _label_reject_reason(validated)
         rejected_pre_dedup = labeled.filter(col("reject_reason") != "OK").withColumn(
             "rejected_at", current_timestamp()
         )
+        # Cache rejected_pre_dedup: counted for quarantine_rows then written to Delta
+        rejected_pre_dedup.cache()
 
         clean = filter_clean_records(validated)
 
@@ -88,9 +99,15 @@ def process_silver_batch(batch_df, epoch_id: int) -> None:
             .withColumn("reject_reason", lit("DUPLICATE_EVENT"))
             .withColumn("rejected_at", current_timestamp())
         )
+        # Cache duplicates: counted for duplicate_rejects then conditionally written
+        duplicates.cache()
+
         deduped = duplicate_checked.filter(col("duplicate_count") == 1).drop("duplicate_count")
         final = apply_feature_engineering(deduped)
+        # Cache final: counted for total_out then written to Delta
+        final.cache()
 
+        # All counts now hit cached DataFrames — no repeated full scans
         dq_breakdown = {
             r["dq_flag"]: r["count"]
             for r in dq_df.groupBy("dq_flag").count().collect()
@@ -153,7 +170,10 @@ def process_silver_batch(batch_df, epoch_id: int) -> None:
         log.exception("Silver batch=%d | FAILED — batch dropped", epoch_id)
         raise
     finally:
-        batch_df.unpersist()
+        # Unpersist all cached DataFrames to free executor memory for the next batch
+        for df in (batch_df, validated, duplicates, rejected_pre_dedup, final):
+            if df is not None:
+                df.unpersist()
 
 
 log.info("Reading bronze Delta stream from %s", cfg.BRONZE_PATH)
