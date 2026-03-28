@@ -1,0 +1,24 @@
+# ──────────────────────────────────────────────────────────────────────
+# mobility-analytics — Python dependencies
+# ──────────────────────────────────────────────────────────────────────
+# Versions pinned to match the Docker images in docker-compose.yml:
+#   apache/spark:3.5.1  →  pyspark 3.5.1
+#   delta-spark 3.2.0   →  must pair with spark 3.5.x
+
+# ── Spark & Delta ──────────────────────────────────────────────────────
+pyspark==3.5.1
+delta-spark==3.2.0
+
+# ── Kafka producer ────────────────────────────────────────────────────
+# kafka-python is unmaintained and broken on Python 3.12+
+# kafka-python-ng is the maintained fork and a drop-in replacement
+kafka-python-ng==2.2.3
+faker==24.0.0
+pytz==2024.1
+
+# ── Testing ───────────────────────────────────────────────────────────
+pytest==8.1.1
+pytest-cov==5.0.0       # coverage report (--cov flag)
+
+# ── Code quality ──────────────────────────────────────────────────────
+ruff==0.4.1             # linter + formatter (replaces flake8 + black)

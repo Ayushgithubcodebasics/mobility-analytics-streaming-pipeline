@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+
+  <!-- PostgreSQL JDBC Connection -->
+  <property>
+    <name>javax.jdo.option.ConnectionURL</name>
+    <value>jdbc:postgresql://postgres-metastore:5432/metastore</value>
+    <description>JDBC URL for the Hive metastore backend database</description>
+  </property>
+
+  <property>
+    <name>javax.jdo.option.ConnectionDriverName</name>
+    <value>org.postgresql.Driver</value>
+    <description>PostgreSQL JDBC driver class</description>
+  </property>
+
+  <property>
+    <name>javax.jdo.option.ConnectionUserName</name>
+    <value>hive</value>
+  </property>
+
+  <property>
+    <name>javax.jdo.option.ConnectionPassword</name>
+    <value>hive</value>
+  </property>
+
+  <!-- Schema Management -->
+  <property>
+    <name>datanucleus.autoCreateSchema</name>
+    <value>false</value>
+    <description>DataNucleus will NOT auto-create schema. Schema is managed by schematool on IS_RESUME=false.</description>
+  </property>
+
+  <property>
+    <name>datanucleus.schema.autoCreateAll</name>
+    <value>false</value>
+  </property>
+
+  <property>
+    <name>hive.metastore.schema.verification</name>
+    <value>true</value>
+    <description>Verify Hive schema version matches the running Hive version</description>
+  </property>
+
+  <!-- Metastore Thrift URI -->
+  <property>
+    <name>hive.metastore.uris</name>
+    <value>thrift://hive-metastore:9083</value>
+    <description>Thrift URI for Spark and BI tools to connect to this metastore</description>
+  </property>
+
+  <!-- Warehouse Directory -->
+  <property>
+    <name>hive.metastore.warehouse.dir</name>
+    <value>/opt/hive/warehouse</value>
+    <description>Default location for Hive managed tables</description>
+  </property>
+
+  <!-- Connection Pool Tuning -->
+  <property>
+    <name>datanucleus.connectionPool.maxPoolSize</name>
+    <value>10</value>
+  </property>
+
+  <property>
+    <name>datanucleus.connectionPool.minPoolSize</name>
+    <value>2</value>
+  </property>
+
+  <property>
+    <name>hive.metastore.event.db.notification.api.auth</name>
+    <value>false</value>
+    <description>Disable auth for metastore notification API (local dev)</description>
+  </property>
+
+</configuration>

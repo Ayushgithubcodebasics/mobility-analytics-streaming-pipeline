@@ -1,0 +1,87 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# =========================
+# Virtual environments
+# =========================
+.venv/
+venv/
+.venv311/
+env/
+ENV/
+
+# =========================
+# Environment / secrets
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# Spark / Delta / local data
+# =========================
+warehouse/
+metastore_db/
+spark-warehouse/
+checkpoints/
+tmp/
+temp/
+
+# =========================
+# Logs / outputs
+# =========================
+*.log
+logs/
+test_results.txt
+
+# =========================
+# Build / packaging
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# =========================
+# Archives
+# =========================
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# Power BI / local large artifacts
+# Uncomment the next line only if you do NOT want to upload .pbix files
+# *.pbix
+# =========================

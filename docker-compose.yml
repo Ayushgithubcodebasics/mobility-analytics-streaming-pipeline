@@ -1,0 +1,197 @@
+# ════════════════════════════════════════════════════════════════════
+#  mobility-analytics  ·  Docker Compose  ·  Local Portfolio Stack
+# ════════════════════════════════════════════════════════════════════
+#
+#  Services:
+#    postgres-metastore  — Hive metastore backend (PostgreSQL 13)
+#    hive-metastore      — Apache Hive 3.1.3 metastore service
+#    spark-master        — Spark cluster manager UI + resource allocator
+#    spark-worker        — Spark executor (driver + worker in one node)
+#    kafka               — Apache Kafka 3.7.1 (KRaft, no Zookeeper)
+#    kafka-ui            — Provectus Kafka UI for topic monitoring
+#
+#  FIRST RUN:
+#    Set HIVE_IS_RESUME=false in .env  → docker compose up -d
+#  ALL SUBSEQUENT RESTARTS:
+#    Set HIVE_IS_RESUME=true  in .env  → docker compose up -d
+# ════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ────────────────────────────────────────────
+  # HIVE METASTORE DATABASE (PostgreSQL)
+  # ────────────────────────────────────────────
+  postgres-metastore:
+    image: postgres:13
+    container_name: hive-metastore-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-metastore}
+      POSTGRES_USER: ${POSTGRES_USER:-hive}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hive}
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data   # ← persists DB across restarts
+    networks:
+      - traffic_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hive} -d ${POSTGRES_DB:-metastore}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ────────────────────────────────────────────
+  # HIVE METASTORE SERVICE
+  # ────────────────────────────────────────────
+  hive-metastore:
+    image: apache/hive:3.1.3
+    container_name: hive-metastore
+    restart: unless-stopped
+    depends_on:
+      postgres-metastore:
+        condition: service_healthy   # waits for Postgres to be ready before starting
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      # IMPORTANT: false on first run (schema init), true on every subsequent restart
+      IS_RESUME: "${HIVE_IS_RESUME:-false}"
+    ports:
+      - "9083:9083"
+    volumes:
+      - ./hive-conf/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
+      - ./warehouse:/opt/hive/warehouse
+    networks:
+      - traffic_net
+
+  # ────────────────────────────────────────────
+  # SPARK MASTER (Cluster Manager)
+  # ────────────────────────────────────────────
+  spark-master:
+    image: apache/spark:3.5.1
+    container_name: spark-master
+    hostname: spark-master
+    restart: unless-stopped
+    command: >
+      bash -c "
+        /opt/spark/sbin/start-master.sh &&
+        sleep 3 &&
+        tail -F /opt/spark/logs/spark--org.apache.spark.deploy.master.Master*.out 2>/dev/null ||
+        tail -f /dev/null
+      "
+    ports:
+      - "8080:8080"   # Spark Master Web UI
+      - "7077:7077"   # Spark Master RPC port
+    volumes:
+      - ./warehouse:/opt/spark/warehouse
+      - ./apps:/opt/spark-apps
+      - ./scripts:/opt/spark-scripts
+      - spark_ivy:/tmp/.ivy
+    networks:
+      - traffic_net
+    environment:
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: 7077
+      SPARK_MASTER_WEBUI_PORT: 8080
+
+  # ────────────────────────────────────────────
+  # SPARK WORKER (Driver + Executor)
+  # ────────────────────────────────────────────
+  spark-worker:
+    image: apache/spark:3.5.1
+    container_name: spark-worker
+    hostname: spark-worker
+    restart: unless-stopped
+    depends_on:
+      - spark-master
+    command: bash -c "/opt/spark/sbin/start-worker.sh spark://spark-master:7077 && tail -f /dev/null"
+    ports:
+      - "8081:8081"    # Spark Worker Web UI
+      - "4040:4040"    # Spark Application UI (driver)
+      - "10000:10000"  # Thrift Server (for PowerBI / JDBC)
+    volumes:
+      - ./warehouse:/opt/spark/warehouse
+      - ./apps:/opt/spark-apps
+      - ./scripts:/opt/spark-scripts
+      - spark_ivy:/tmp/.ivy
+    networks:
+      - traffic_net
+    environment:
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-2g}
+      SPARK_WORKER_WEBUI_PORT: 8081
+
+  # ────────────────────────────────────────────
+  # APACHE KAFKA (KRaft Mode — no Zookeeper)
+  # ────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:3.7.1          # pinned version for reproducibility
+    container_name: kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"    # internal (container-to-container)
+      - "29092:29092"  # external (host machine → Kafka, used by producer)
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_EXTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      # localhost:29092 is used by the producer script running on the host machine
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_EXTERNAL://localhost:29092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_LOG_DIRS: /var/lib/kafka/data   # persisted via named volume
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_RETENTION_BYTES: 1073741824   # 1 GB max log size
+      KAFKA_NUM_PARTITIONS: 3
+    volumes:
+      - kafka_data:/var/lib/kafka/data        # ← persists topics + messages across restarts
+    networks:
+      - traffic_net
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:9092 > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ────────────────────────────────────────────
+  # KAFKA UI (Topic Monitoring)
+  # ────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2    # pinned version
+    container_name: kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    networks:
+      - traffic_net
+
+# ─────────────────────────────────────────────
+# Named Volumes (data persists across restarts)
+# ─────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  kafka_data:
+    driver: local
+  spark_ivy:
+    driver: local
+
+# ─────────────────────────────────────────────
+# Isolated Network
+# ─────────────────────────────────────────────
+networks:
+  traffic_net:
+    driver: bridge
+    name: traffic_analytics_network
