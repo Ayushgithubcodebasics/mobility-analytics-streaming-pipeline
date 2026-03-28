@@ -13,7 +13,7 @@ End-to-end **real-time traffic analytics pipeline** — a Python Kafka producer 
 
 ## Architecture
 
-![Architecture](assets/architecture.svg)
+![Architecture](docs/screenshots/Architecture.png)
 
 **Data flow:** `Python Producer` → `Kafka (3 partitions)` → `Spark Structured Streaming` → `Delta Lake Medallion` → `Hive Metastore` → `Power BI`
 
@@ -86,17 +86,87 @@ Six analytics views registered in Hive and queryable via Spark SQL / Thrift Serv
 
 ## Pipeline Execution Evidence
 
+---
+
+### Kafka Producer — Streaming Traffic Events to Topic
+
 ![](docs/screenshots/Kafka_producer_streaming_traffic_events_to_topic.png)
+
+Python producer connected to `localhost:29092`, sending events to `traffic-topic` at 0.5–1.5s/msg with 30% dirty ratio. 1,850+ events sent with 0 errors and event cache capped at 500.
+
+---
+
+### Bronze Layer — Raw Kafka Events Landing in Delta Lake
+
 ![](docs/screenshots/Bronze_layer___raw_Kafka_events_landing_in_Delta_Lake__batch_streaming_active.png)
+
+Spark Structured Streaming consuming from Kafka with 10-second micro-batches. Raw JSON records written to Delta Lake at `/opt/spark/warehouse/traffic_bronze` with no transformation applied.
+
+---
+
+### Silver Layer — DQ Validation, Quarantine, Feature Engineering
+
 ![](docs/screenshots/Silver_layer___DQ_validation__quarantine__feature_engineering.png)
+
+Five-stage DQ pipeline running per micro-batch via `foreachBatch`. Batch 0: 476 records in → 368 clean → 108 quarantined (22.7%). Reject breakdown logged per batch: `CORRUPT_JSON`, speed rejects, time rejects, duplicates.
+
+---
+
+### Gold Layer — Dimensional Model Loaded via Delta MERGE
+
 ![](docs/screenshots/Gold_layer___dimensional_model_loaded_via_Delta_MERGE__idempotent_upserts_.png)
+
+Gold batch 0 created `dim_zone` (5 rows), `dim_road` (4 rows), and `fact_traffic` (1,440 rows) using `DeltaTable.merge()` — idempotent upserts safe to rerun from checkpoint.
+
+---
+
+### Hive Metastore — All Delta Tables and BI Views Registered
+
 ![](docs/screenshots/All_Delta_tables_and_BI_views_registered_in_Hive_Metastore.png)
+
+All 3 Delta tables (`dim_zone`, `dim_road`, `fact_traffic`) and 6 analytics views (`v_live_summary`, `v_hourly_congestion`, `v_road_performance`, `v_weather_impact`, `v_speed_distribution`, `v_zone_kpis`) registered and queryable via Spark SQL / Thrift Server.
+
+---
+
+### fact_traffic — 1,475 Rows from Live Streaming Pipeline
+
 ![](docs/screenshots/fact_traffic_table_populated_with_1_475_rows_from_live_streaming_pipeline.png)
+
+`fact_traffic` row count confirmed via Spark SQL after a full pipeline run. Merge key: `(vehicle_id, road_id, city_zone, event_ts)` — no duplicates.
+
+---
+
+### Unit Tests Passing
+
 ![](docs/screenshots/Unit_tests_passing___producer_generation_tests_clean.png)
+
+3 unit tests passing in 0.43s on Python 3.11, pytest 8.1.1. All Silver DQ transformation functions tested in isolation — no Docker, no Kafka, no Delta required.
+
+---
+
+### Spark Master UI
+
 ![](docs/screenshots/Spark_Master_UI.png)
+
+Spark 3.5.1 cluster: 1 worker, 2 cores, 2 GiB memory. 3 completed applications — `TrafficBronze`, `TrafficSilver`, `TrafficGold` — all finished successfully.
+
+---
+
+### Spark Worker UI
+
 ![](docs/screenshots/Spark_Worker_UI.png)
+
+Single worker at `172.18.0.5:41105` showing 3 finished executors for Bronze, Silver, and Gold jobs. Each executor allocated 2 cores and 1,024 MiB.
+
+---
+
+### Kafka UI — traffic-topic
+
 ![](docs/screenshots/Kafka_UI___traffic-topic.png)
-![](docs/screenshots/Architecture.png)
+
+Kafka 3.7-IV4 cluster online. 1 broker, 3 partitions, `traffic-topic` active. KRaft mode — no ZooKeeper dependency.
+
+---
 
 ---
 
